@@ -39,11 +39,30 @@ export class TaskManager {
     this.loaded = true;
   }
 
+  // Saves are serialized through a promise chain: concurrent save() calls
+  // used to race on the shared tasks.json.tmp file (one rename could remove
+  // the tmp file another save was about to rename -> ENOENT). Serializing
+  // removes that race. If the manager is closed, saves become no-ops.
   async save() {
-    await fs.mkdir(this.dataDir, { recursive: true });
-    const tmp = this.file + '.tmp';
-    await fs.writeFile(tmp, JSON.stringify([...this.tasks.values()], null, 2), 'utf8');
-    await fs.rename(tmp, this.file);
+    const run = async () => {
+      if (this.closed) return;
+      await fs.mkdir(this.dataDir, { recursive: true });
+      const tmp = this.file + '.tmp';
+      await fs.writeFile(tmp, JSON.stringify([...this.tasks.values()], null, 2), 'utf8');
+      await fs.rename(tmp, this.file);
+    };
+    this._saveQueue = (this._saveQueue ?? Promise.resolve()).then(run, run);
+    return this._saveQueue;
+  }
+
+  // Stop background work: further saves become no-ops and running tasks
+  // are asked to cancel. Awaits the in-flight save queue first, so a save
+  // that already passed the closed-check cannot recreate files after the
+  // caller deletes the data directory. Call this before deleting it.
+  async close() {
+    this.closed = true;
+    for (const run of this.running.values()) run.cancelRequested = true;
+    try { await (this._saveQueue ?? Promise.resolve()); } catch { /* ignore */ }
   }
 
   create({ type, title, payload = {}, createdBy = null }) {
@@ -120,7 +139,7 @@ export class TaskManager {
       }
     } catch (err) {
       this.logger?.error(`task ${id} failed: ${err.message}`);
-      if (task.attempts < this.maxRetries && !runState.cancelRequested) {
+      if (task.attempts < this.maxRetries && !runState.cancelRequested && !this.closed) {
         const delay = RETRY_DELAYS_MS[Math.min(task.attempts - 1, RETRY_DELAYS_MS.length - 1)];
         task.status = 'queued';
         task.error = err.message;
