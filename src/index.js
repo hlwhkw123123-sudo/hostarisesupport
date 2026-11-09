@@ -28,8 +28,19 @@ async function main() {
   const bot = createBot({ config, logger, tasks });
   await bot.start();
 
+  // In live mode grammY long-polling holds the event loop open. In mock
+  // mode nothing does, so the process would exit immediately after
+  // starting; keep it alive with a heartbeat until SIGINT/SIGTERM.
+  let heartbeat = null;
+  if (config.mockMode) {
+    heartbeat = setInterval(() => {
+      logger.info('mock mode heartbeat — bot running (no real Telegram connection)');
+    }, 60000);
+  }
+
   const shutdown = async (signal) => {
     logger.info(`Received ${signal}; shutting down gracefully...`);
+    if (heartbeat) clearInterval(heartbeat);
     try { await bot.stop(); } catch (err) { logger.error(`bot stop error: ${err.message}`); }
     logger.info('Shutdown complete.');
     process.exit(0);

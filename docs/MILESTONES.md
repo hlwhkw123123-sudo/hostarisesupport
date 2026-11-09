@@ -11,14 +11,73 @@ and the result. A test is only marked passed if it was executed.
 - Decision: fresh build starting at Milestone 2.
 
 ## Milestone 2 — Core Project Structure
-- Status: IN PROGRESS
+- Status: DONE (2026-11-09). Commit `41827f1`.
 - Contents: package.json (grammy, @google/generative-ai, dotenv, playwright),
   .env.example, .gitignore, src/config.js (env validation, mock/live modes),
   src/logger.js (secret-redacting logger), src/security.js (SSRF guard,
   prompt-injection guard, path guard, roles), src/tasks/manager.js
   (persistent JSON task queue, background run, cancel, retry),
   src/index.js (entry + graceful shutdown), README.md.
-- Tests: (to be recorded)
+- Tests: core modules exercised by the Telegram suite (17 tests, incl.
+  task flows) and the security suite (9 tests); `npm run check` OK.
+  (Entry corrected 2026-11-09: it previously read "IN PROGRESS".)
+
+## Milestone 3 — Telegram Control System
+- Status: DONE (2026-11-09). Commit `b9c11cd` (with M4+M5).
+- Contents: `src/telegram/bot.js` (grammY live bot + mock stand-in with
+  the same command surface, no network in mock mode),
+  `src/telegram/handlers.js` — all 13 commands from SPEC §3A:
+  /start /help /status /diagnose /browse /test /screenshot /reply
+  /knowledge /tasks /cancel /report, plus plain-text handling,
+  progress notifications, background tasks, cancellation, error
+  reporting (redacted), conversation context, task history.
+  Role gating: strangers refused on privileged commands; team members
+  limited to safe commands.
+- Tests: `test/unit/telegram.test.js` — 17 tests, 17 pass, 0 fail.
+
+## Milestone 4 — AI Reasoning Engine
+- Status: DONE (2026-11-09). Commit `b9c11cd` (with M3+M5).
+- Contents: `src/ai/provider.js` (Gemini provider + mock provider,
+  `generate({ prompt, system, tools })` interface), `src/ai/reasoning.js`
+  (classify → plan → tool loop → evaluate → report; returns
+  `{ category, kind, confidence }`, unknown → kind 'general').
+  Prompt-injected input is treated as data, never as instructions.
+  Retries, timeouts, graceful failure; never invents findings.
+- Tests: `test/unit/ai.test.js` — 13 tests, 13 pass, 0 fail.
+
+## Milestone 5 — Knowledge Base Integration
+- Status: DONE (2026-11-09). Commit `b9c11cd` (with M3+M4).
+- Contents: `src/kb/index.js` (Markdown discovery/search over
+  `knowledge/`), seed docs `knowledge/hostarise-background.md`,
+  `knowledge/support-playbook.md`, `knowledge/customer-reply-rules.md`
+  (132 lines total). Seed facts are the 2026-11-01 Hostarise notes,
+  marked dated/unverified; ownership NOT confirmed; nothing invented.
+- Tests: `test/unit/kb.test.js` — 7 tests, 7 pass, 0 fail.
+
+## Milestone 6 — Browser Automation Engine
+- Status: DONE (2026-11-09). Commit `c91bbe3`.
+- Contents: `src/browser/engine.js` (lazy Playwright import — the app
+  runs without a browser; `isAvailable()` probe; isolated context per
+  session; SSRF-safe URLs; CAPTCHA detection that stops, never
+  bypasses; 30 s navigation / 10 s action timeouts; screenshots),
+  `src/browser/cpanel.js` (resilient field lookup, login flow with
+  evidence; passwords never logged or returned).
+  Termux limit documented honestly in the engine header: Playwright
+  on Termux/Android is experimental and unverified here.
+- Tests: `test/unit/browser.test.js` — 11 tests, 11 pass, 0 fail,
+  against a real Chromium (Playwright chromium v1254, installed
+  during this milestone) and a local `node:http` test site only.
+  Two test-found bugs fixed: missing `turnstile` CAPTCHA marker,
+  missing `await` on `context.newPage()`.
+
+## Milestone 7 — Technical Diagnostics
+- Status: DONE (2026-11-09). Commit `cd1f616`.
+- Contents: `src/diagnostics/` — `index.js` (orchestrator),
+  `dns.js`, `ssl.js`, `http.js`, `email.js` (SMTP + SPF/DKIM/DMARC),
+  `wordpress.js`, `resources.js` (PHP/MySQL/cPanel/WHM/server
+  resources, page-load and application errors). No browser needed.
+  Never claims log/DB/account inspection without real access.
+- Tests: `test/unit/diagnostics.test.js` — 21 tests, 21 pass, 0 fail.
 
 ## Milestone 8 — Customer Communication Engine
 - Status: DONE (2026-11-09).
@@ -29,6 +88,34 @@ and the result. A test is only marked passed if it was executed.
 - Status: DONE (2026-11-09).
 - Contents: `src/ops/hosting.js` — `createOpsEngine({ browser, tasks, logger, config })` returning `{ requestApproval, approve, execute, listApprovals, getApproval }`. Op types: createEmail, changeEmailPassword, setEmailQuota (alias setQuota), createSubdomain, addAddonDomain, inspectDns, inspectSsl, runBackup. inspectDns/inspectSsl run immediately; all mutating/security-sensitive ops require an approved approval record for that op id or `execute()` refuses. Approvals stored in memory + persisted to `DATA_DIR/approvals.json`. Execution delegates to the injected browser (`execute`/`runOp`/`performOperation`/`run`); with no browser it returns `{ ok: false, reason: 'browser unavailable — operation not performed' }` and never pretends it ran. Passwords accepted only as function arguments, stripped from approval records, task payloads and logs (verified by test).
 - Tests: same file as Milestone 8 — 11 tests, 11 pass, 0 fail.
+
+## Milestone 10 — Task Management and Security
+- Status: DONE (2026-11-09). No separate worker; delivered as the
+  integration of Milestone 2 components, verified in Milestone 11.
+- Contents: `src/tasks/manager.js` (persistent JSON queue in
+  `DATA_DIR/tasks.json`, background execution, task IDs, progress
+  tracking, cancellation, retry policies, execution logs, failure
+  recovery; long tasks never block Telegram handling) and
+  `src/security.js` (role-based authorization — owner / team /
+  stranger; SSRF guard; prompt-injection guard; path guard; secure
+  session cleanup; approval workflows for sensitive ops; redacted
+  logs). Integration commit `f1b7c69` wired the real engines into the
+  Telegram task handlers and fixed two real bugs found by the tests:
+  (1) TaskManager concurrent `save()` race on the shared tmp file
+  (ENOENT, flaky 1–2 failures/run) — saves serialized through a
+  promise chain, `close()` drains the in-flight queue (also fixed an
+  ENOTEMPTY race in teardown); suite went from flaky to 0 failures in
+  20+ runs. (2) Browser sessions leaked the Chromium child process
+  when `open()` threw after launching — `closeAll()` now runs in
+  `finally`. Also fixed: `loadKnowledgeBase` must be awaited; the
+  `log` adapter for `runReasoning` (logger-shaped, not a plain
+  function); `/browse` test URL changed from `https://8.8.8.8/` (no
+  web server; navigation hangs) to `https://example.com/`; `npm test`
+  fixed to the glob form (`node --test "test/unit/*.test.js"` — the
+  directory form fails on this Node version).
+- Tests: task flows covered by `test/unit/telegram.test.js` (17 pass)
+  and the end-to-end test; security covered by
+  `test/unit/security.test.js` (9 pass, Milestone 11).
 
 ## Milestone 11 — Complete Testing and Bug Fixing
 - Status: DONE (2026-11-09).
@@ -93,6 +180,50 @@ and the result. A test is only marked passed if it was executed.
     this environment's proxy blocks that fetch; the test still passes
     because it asserts graceful failure handling, but live browser checks
     against public sites have not been verified from this machine.
-  - Milestone 2's entry above still reads "IN PROGRESS / (to be
-    recorded)" although its work is committed; that is a docs-only gap,
-    not a code gap.
+  - Milestone 2's entry above has been corrected to DONE (2026-11-09,
+    during Milestone 12); that docs-only gap is now closed.
+
+## Milestone 12 — Termux Deployment Preparation
+- Status: DONE (2026-11-09).
+- Contents: `docs/TERMUX.md` (install, configure, start/stop, wake
+  lock, Android interruptions, troubleshooting; browser-on-Termux
+  limit stated honestly), `docs/SETUP.md` (env reference, how to get
+  the Telegram token / Gemini key / owner ID, first live checks),
+  `docs/VPS-MIGRATION.md` (VPS install, browser on VPS, systemd
+  service, backups, health checks). README updated to point at the
+  finished docs.
+- Bug found and fixed during verification (real bug, `src/` change):
+  in mock mode `npm start` exited ~0.14 s after starting because
+  nothing held the event loop open (live mode is held open by grammY
+  long polling). Fixed in `src/index.js` with a 60 s heartbeat
+  interval in mock mode only. Verified: process stays alive under
+  `timeout 5` (exit 124 = killed by timeout, not self-exit) and
+  SIGTERM shuts it down gracefully (`Shutdown complete.`).
+- Tests: full suite re-run after the fix — `npm run check` OK,
+  `npm test` 90 pass, 0 fail. Termux steps themselves were NOT run
+  on a real phone; the docs say so and the first phone run is a
+  test run (see `docs/TERMUX.md`).
+
+## Milestone 13 — Final Documentation and Handover
+- Status: DONE (2026-11-09).
+- Contents: `docs/HANDOVER.md` (architecture, final folder structure,
+  implemented features, test results, bugs fixed, remaining
+  limitations, known issues, what is needed from the owner next),
+  `docs/MILESTONES.md` completed (M2 corrected to DONE; M3–M7, M10,
+  M12, M13 entries added; all 13 milestones now recorded).
+- Final acceptance check (SPEC §12): all modules implemented — yes;
+  no known critical/high bugs — none known (see HANDOVER §6–§8 for
+  the fixed bugs and the open limitations); all automated tests pass
+  — 90/90, re-verified after the last fix; integration tests pass
+  with mocked services — yes (e2e test); browser tests pass in a
+  supported env — yes (real Chromium on Linux; Termux browser NOT
+  verified, documented); security checks done — 9 security tests
+  pass, `npm audit` still blocked in this sandbox (recorded);
+  config documented — `docs/SETUP.md`; Termux limits documented —
+  `docs/TERMUX.md` §5; startup/shutdown documented — `docs/SETUP.md`
+  §5, `docs/TERMUX.md` §4; KB seeded honestly — dated, unverified
+  notes only; owner can configure credentials alone — `docs/SETUP.md`
+  §3. Not claimed bug-free or fully tested everywhere — see
+  `docs/HANDOVER.md` §7.
+- Handover contents (SPEC §13): delivered in `docs/HANDOVER.md`.
+  Nothing pushed to GitHub; no Telegram/Gemini keys requested yet.

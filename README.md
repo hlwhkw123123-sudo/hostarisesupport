@@ -6,8 +6,10 @@ separate web dashboard is needed for normal operations.
 
 ## Status
 
-Under active development on the `dev` branch. See `docs/MILESTONES.md`
-for per-milestone progress and test results.
+Build complete on the `dev` branch (all 13 milestones, 2026-11-09).
+Full test suite: 90/90 pass. See `docs/MILESTONES.md` for
+per-milestone progress and test results, and `docs/HANDOVER.md` for
+the handover report. Nothing has been pushed to GitHub yet.
 
 ## Quick start (mock mode — no keys needed)
 
